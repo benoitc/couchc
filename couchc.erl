@@ -198,6 +198,14 @@ save_doc(Db, {DocProps}=Doc, Options) ->
 delete_doc(Db, Doc) ->
     delete_doc(Db, Doc, []).
 
+
+delete_doc(Db, {DocId, DocRev}, Options)
+        when is_binary(DocId) andalso is_binary(DocRev) ->
+    Doc = {[
+            {<<"_id">>, DocId},
+            {<<"_rev">>, DocRev},
+            {<<"_deleted">>, true}]},
+    save_doc(Db, Doc, Options);
 delete_doc(Db, {DocProps}, Options) ->
     Doc = {[{<<"_deleted">>, true}|DocProps]},
     save_doc(Db, Doc, Options).
