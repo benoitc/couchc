@@ -11,12 +11,18 @@
          open_db/1, open_db/2,
          open_or_create_db/1, open_or_create_db/2,
          db_info/1,
+         purge_docs/2,
+         db_set_security/2, db_get_security/1,
+         db_set_revs_limit/2, db_get_revs_limit/1,
+         db_missing_revs/2, db_revs_diff/2,
+         compact/1, compact/2,
+         view_cleanup/1,
          ensure_full_commit/1, ensure_full_commit/2,
          get_uuid/0, get_uuids/1,
          open_doc/2, open_doc/3, open_doc_rev/4,
          save_doc/2, save_doc/3,
          delete_doc/2, delete_doc/3,
-         db_exec/2]).
+         db_exec/2, db_admin_exec/2]).
 
 
 get_uuid() ->
@@ -103,6 +109,84 @@ ensure_full_commit(Db, Options) ->
         end
     end).
 
+purge_docs(Db, IdsRevs) ->
+    IdsRevs2 = parse_ids_revs(IdsRevs),
+    db_exec(Db, fun(Db0) ->
+        case couch_db:purge_docs(Db0, IdsRevs2) of
+            {ok, PurgeSeq, PurgedIdsRevs} ->
+                PurgedIdsRevs2 = [{Id, couch_doc:revs_to_strs(Revs)} || 
+                    {Id, Revs} <- PurgedIdsRevs],
+                {ok, PurgeSeq, PurgedIdsRevs2};
+            Error ->
+                {error, Error}
+        end
+    end).
+
+
+db_set_security(Db, SecObj) ->
+    db_exec(Db, fun(Db0) ->
+                couch_db:set_security(Db0, SecObj)
+        end).
+
+db_get_security(Db) ->
+    db_exec(Db, fun(Db0) ->
+                couch_db:get_security(Db0)
+        end).
+
+db_set_revs_limit(Db, Limit) ->
+    db_exec(Db, fun(Db0) ->
+                couch_db:set_revs_limit(Db0, Limit)
+        end).
+
+db_get_revs_limit(Db) ->
+    db_exec(Db, fun(Db0) ->
+                couch_db:get_revs_limit(Db0)
+        end).
+
+
+db_missing_revs(Db, IdsRevs) ->
+    IdsRevs2 = parse_ids_revs(IdsRevs),
+    db_exec(Db, fun(Db0) ->
+        {ok, Results} = couch_db:get_missing_revs(Db0, IdsRevs2),
+        Results2 = [{Id, couch_doc:revs_to_strs(Revs)} || {Id, Revs, _}
+            <- Results],
+        {ok, Results2}
+    end).
+
+db_revs_diff(Db, IdsRevs) ->
+    IdsRevs2 = parse_ids_revs(IdsRevs),
+    db_exec(Db, fun(Db0) ->
+        {ok, Results} = couch_db:get_missing_revs(Db0, IdsRevs2),
+        Results2 = 
+        lists:map(fun({Id, MissingRevs, PossibleAncestors}) ->
+            {Id,
+                {[{missing, couch_doc:revs_to_strs(MissingRevs)}] ++
+                    if PossibleAncestors == [] ->
+                        [];
+                    true ->
+                        [{possible_ancestors,
+                            couch_doc:revs_to_strs(PossibleAncestors)}]
+                end}}
+        end, Results),
+        {ok, Results2}
+    end).
+       
+
+compact(Db) ->
+    db_admin_exec(Db, fun(Db0) ->
+        couch_db:start_compact(Db0)
+    end).
+
+compact(#cdb{name=DbName}=Db, DName) ->
+    db_admin_exec(Db, fun(_) ->
+        couch_view_compactor:start_compact(dbname(DbName),
+                    couch_util:to_binary(DName))
+    end).
+
+view_cleanup(Db) ->
+    db_admin_exec(Db, fun(Db0) ->
+        couch_view:cleanup_index_files(Db0)
+    end).
 
 open_doc(Db, DocId) ->
     open_doc(Db, DocId, []).
@@ -257,8 +341,19 @@ db_exec(#cdb{name=DbName,options=Options}, Fun) ->
             {error, {db, Error}}
     end.
 
+db_admin_exec(Db, Fun) ->
+    db_exec(Db, fun(Db0) ->
+        try couch_db:check_is_admin(Db0) of
+            ok -> Fun(Db0)
+        catch
+            _:Error -> {error, Error}
+        end
+    end).
 
 %% private functions
+
+parse_ids_revs(IdsRevs) ->
+    [{Id, couch_doc:parse_revs(Revs)} || {Id, Revs} <- IdsRevs].
 
 maybe_docid({DocProps}=Doc) ->
     case couch_util:get_value(<<"_id">>, DocProps) of
