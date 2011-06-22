@@ -11,6 +11,7 @@
          open_db/1, open_db/2,
          open_or_create_db/1, open_or_create_db/2,
          db_info/1,
+         ensure_full_commit/1, ensure_full_commit/2,
          get_uuid/0, get_uuids/1,
          open_doc/2, open_doc/3, open_doc_rev/4,
          save_doc/2, save_doc/3,
@@ -78,6 +79,29 @@ db_info(Db) ->
                 couch_db:get_db_info(Db0)
         end).
 
+ensure_full_commit(Db) ->
+    ensure_full_commit(Db, []).
+
+ensure_full_commit(Db, Options) ->
+    db_exec(Db, fun(Db0) ->
+        UpdateSeq = couch_db:get_update_seq(Db0),
+        CommittedSeq = couch_db:get_committed_update_seq(Db0),
+        case proplists:get_value(seq, Options) of
+            undefined ->
+                couch_db:ensure_full_commit(Db0);
+            RequiredSeq ->
+                RequiredSeq0 = couch_util:to_integer(RequiredSeq),
+                if 
+                    RequiredSeq0 > UpdateSeq ->
+                        {error, {bad_request, 
+                                "can't do a full commit ahead of current update_seq"}};
+                    RequiredSeq > CommittedSeq ->
+                        couch_db:ensure_full_commit(Db0);
+                    true ->
+                        {ok, Db0#db.instance_start_time}
+                end
+        end
+    end).
 
 
 open_doc(Db, DocId) ->
@@ -209,6 +233,7 @@ delete_doc(Db, {DocId, DocRev}, Options)
 delete_doc(Db, {DocProps}, Options) ->
     Doc = {[{<<"_deleted">>, true}|DocProps]},
     save_doc(Db, Doc, Options).
+
 
 
 %%save_docs(Db, Docs) ->
