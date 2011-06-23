@@ -59,7 +59,7 @@ handle_doc_test() ->
         ?assert(Result1 == {error, {not_found, missing}})
     end).
 
-handle_bulkdoc_test() ->
+bulkdocs_test() ->
     do_test(fun(Db) ->
         Docs = [
             {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}]},
@@ -83,3 +83,28 @@ handle_bulkdoc_test() ->
         Result = couchc:open_doc(Db, DocId),
         ?assert(Result == {error, {not_found, deleted}})
     end).
+
+alldocs_test() ->
+    do_test(fun(Db) ->
+        Docs = [
+            {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}]},
+            {[{<<"_id">>, <<"b">>}, {<<"v">>, 1}]}],
+        Results = couchc:save_docs(Db, Docs),
+        ?assertEqual(2, length(Results)),
+        R = couchc:all(Db),
+        ?assertMatch({ok, {_, _, _}}, R),
+        {ok, {TotalRowsCount, Offset, Results1}} = R,
+        ?assertEqual(2, TotalRowsCount),
+        ?assertEqual(2, Offset),
+        [{DP}|_] = Results1,
+        DocId = proplists:get_value(id, DP),
+
+        ?assert(DocId =/= undefined),        
+        ?assert(lists:member(DocId, [<<"a">>, <<"b">>])),
+
+        {ok, Doc} = couchc:open_doc(Db, <<"a">>),
+        {ok, _, _} = couchc:delete_doc(Db, Doc),
+        {ok, {TotalRowsCount1, _, _}} = couchc:all(Db),
+        ?assertEqual(1, TotalRowsCount1)
+    end).
+

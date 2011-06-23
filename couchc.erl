@@ -675,10 +675,10 @@ make_map_row_fold_fun(ViewFoldFun) ->
     end.
 
 make_docs_row_fold_fun(ViewFoldFun) ->
-    fun(_Resp, Db, {{Key, DocId}, _}=KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
+    fun(_Resp, Db, KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
         JsonObj = all_docs_view_row_obj(Db, KV, IncludeDocs,
             Conflicts),
-        {Go, NewAcc} = ViewFoldFun({{Key, DocId}, JsonObj}, Acc),
+        {Go, NewAcc} = ViewFoldFun(JsonObj, Acc),
         {Go, {TotalViewCount, Offset, NewAcc}}
     end.
 
