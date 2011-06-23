@@ -565,11 +565,10 @@ fold_map_view(View, Group, Fun, Db, QueryArgs, nil) ->
             start_response = fun start_map_view_fold_fun/6,
             send_row = make_map_row_fold_fun(Fun)}),
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    {ok, _LastReduce, FoldResult} = couch_view:fold(View,
+    {ok, LastReduce, FoldResult} = couch_view:fold(View,
         FoldlFun, FoldAccInit, couch_httpd_view:make_key_options(QueryArgs)),
-
-    {_, _, _, {Offset, ViewFoldAcc}} = FoldResult,
-    {ok, {RowCount, Offset, ViewFoldAcc}};
+    finish_view_fold(RowCount,
+                couch_view:reduce_to_count(LastReduce), FoldResult);
 fold_map_view(View, Group, Fun, Db, QueryArgs, Keys) ->
     #view_query_args{
         limit = Limit,
@@ -578,7 +577,7 @@ fold_map_view(View, Group, Fun, Db, QueryArgs, Keys) ->
     CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, Keys),
     {ok, RowCount} = couch_view:get_row_count(View),
     FoldAccInit = {Limit, SkipCount, undefined, []},
-    {_LastReduce, FoldResult} = lists:foldl(fun(Key, {_, FoldAcc}) ->
+    {LastReduce, FoldResult} = lists:foldl(fun(Key, {_, FoldAcc}) ->
         FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs#view_query_args{},
                 CurrentEtag, Db, Group#group.current_seq, RowCount,
                 #view_fold_helper_funs{
@@ -591,8 +590,8 @@ fold_map_view(View, Group, Fun, Db, QueryArgs, Keys) ->
                      QueryArgs#view_query_args{start_key=Key, end_key=Key})),
         {LastReduce, FoldResult}
     end, {{[],[]}, FoldAccInit}, Keys),
-    {_, _, _, {Offset, ViewFoldAcc}} = FoldResult,
-    {ok, {RowCount, Offset, ViewFoldAcc}}.
+    finish_view_fold(RowCount, couch_view:reduce_to_count(LastReduce),
+                FoldResult).
 
 fold_reduce_view(View, Group, Fun, Db, QueryArgs, nil) ->
     #view_query_args{
@@ -659,18 +658,23 @@ make_reduce_row_fold_fun(ViewFoldFun) ->
     end.
 
 finish_view_fold(TotalRows, Offset, FoldResult) ->
-    {_, _, _, {_, _, AccResult}} = FoldResult,
-    {ok, {TotalRows, Offset, AccResult}}.
+    Result = case FoldResult of
+        {_, _, _,[]} ->
+            [];
+        {_, _, _, {_, _, AccResult}} ->
+            AccResult
+    end,
+    {ok, {TotalRows, Offset, Result}}.
 
 start_map_view_fold_fun(_Req, _Etag, TotalViewCount, Offset, _Acc, _UpdateSeq) ->
     {ok, nil, {TotalViewCount, Offset, []}}.
 
 
 make_map_row_fold_fun(ViewFoldFun) ->
-    fun(_Resp, Db, {{Key, DocId}, _}=KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
+    fun(_Resp, Db, KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
         JsonObj = couch_httpd_view:view_row_obj(Db, KV, IncludeDocs,
             Conflicts),
-        {Go, NewAcc} = ViewFoldFun({{Key, DocId}, JsonObj}, Acc),
+        {Go, NewAcc} = ViewFoldFun(JsonObj, Acc),
         {Go, {TotalViewCount, Offset, NewAcc}}
     end.
 

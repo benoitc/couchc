@@ -5,11 +5,12 @@
 -include("couch_db.hrl").
 
 do_test(Fun) ->
-    {ok, Db} = couchc:create_db("couchc_testdb"),
+    Options = [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}],
+    {ok, Db} = couchc:create_db("couchc_testdb", Options),
     try
         Fun(Db)
     after
-        ok = couchc:delete_db("couchc_testdb")
+        ok = couchc:delete_db("couchc_testdb", Options)
     end.
 
 
@@ -88,7 +89,7 @@ alldocs_test() ->
     do_test(fun(Db) ->
         Docs = [
             {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}]},
-            {[{<<"_id">>, <<"b">>}, {<<"v">>, 1}]}],
+            {[{<<"_id">>, <<"b">>}, {<<"v">>, 2}]}],
         Results = couchc:save_docs(Db, Docs),
         ?assertEqual(2, length(Results)),
         R = couchc:all(Db),
@@ -107,4 +108,41 @@ alldocs_test() ->
         {ok, {TotalRowsCount1, _, _}} = couchc:all(Db),
         ?assertEqual(1, TotalRowsCount1)
     end).
+
+
+view_test() ->
+    do_test(fun(Db) ->
+        DesignDoc = {[
+            {<<"_id">>, <<"_design/test">>},
+            {<<"language">>,<<"javascript">>},
+            {<<"views">>,
+                {[{<<"v1">>,
+                    {[{<<"map">>,
+                        <<"function (doc) {\n if (doc.t == \"test\") {\n emit(doc._id, doc);\n}\n}">>
+                    }]}
+        }]}}]},
+        Docs = [
+            {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}, {<<"t">>, <<"test">>}]},
+            {[{<<"_id">>, <<"b">>}, {<<"v">>, 2}, {<<"t">>, <<"test">>}]}],
+        {ok, _, _} = couchc:save_doc(Db, DesignDoc),
+        Results = couchc:save_docs(Db, Docs),
+        ?assertEqual(2, length(Results)),
+        R = couchc:all(Db, {<<"test">>, <<"v1">>}),
+        ?assertMatch({ok, {_, _, _}}, R),
+        {ok, {TotalRowsCount, Offset, Results1}} = R,
+        ?assertEqual(2, TotalRowsCount),
+        ?assertEqual(2, Offset),
+        [{DP}|_] = Results1,
+        DocId = proplists:get_value(id, DP),
+
+        ?assert(DocId =/= undefined),        
+        ?assert(lists:member(DocId, [<<"a">>, <<"b">>])),
+
+        {ok, Doc} = couchc:open_doc(Db, <<"a">>),
+        {ok, _, _} = couchc:delete_doc(Db, Doc),
+        {ok, {TotalRowsCount1, _, _}} = couchc:all(Db, {<<"test">>, <<"v1">>}),
+        ?assertEqual(1, TotalRowsCount1)
+    end).
+
+
 
