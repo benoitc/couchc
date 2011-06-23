@@ -58,3 +58,28 @@ handle_doc_test() ->
         Result1 = couchc:open_doc(Db, <<"unknown id">>),
         ?assert(Result1 == {error, {not_found, missing}})
     end).
+
+handle_bulkdoc_test() ->
+    do_test(fun(Db) ->
+        Docs = [
+            {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}]},
+            {[{<<"_id">>, <<"b">>}, {<<"v">>, 1}]}],
+        Results = couchc:save_docs(Db, Docs),
+        ?assertEqual(2, length(Results)),
+        [R|_] = Results,
+        {RP} = R,
+        ?assertEqual(true, proplists:get_value(ok, RP)),
+        DocId = proplists:get_value(id, RP),
+        {ok, {DocProps}} = couchc:open_doc(Db, DocId),
+        ?assertEqual(1, proplists:get_value(<<"v">>, DocProps)),
+        DocsToDelete = lists:map(fun({P}) ->
+                    Id = proplists:get_value(id, P),
+                    Rev = proplists:get_value(rev, P),
+                    {[{<<"_id">>, Id},
+                      {<<"_rev">>, Rev}]}
+                    end, Results),
+        Results1 = couchc:delete_docs(Db, DocsToDelete),
+        ?assertEqual(2, length(Results1)),
+        Result = couchc:open_doc(Db, DocId),
+        ?assert(Result == {error, {not_found, deleted}})
+    end).
