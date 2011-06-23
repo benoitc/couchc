@@ -1,3 +1,8 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of couchbeam released under the MIT license. 
+%%% See the NOTICE for more information.
+
 -module(couchc).
 
 -include("couch_db.hrl").

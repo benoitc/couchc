@@ -1,6 +1,11 @@
- -module(couchc_test).
- -compile(export_all).
- -include_lib("eunit/include/eunit.hrl").
+%%% -*- erlang -*-
+%%%
+%%% This file is part of couchbeam released under the MIT license. 
+%%% See the NOTICE for more information.
+ 
+-module(couchc_test).
+-compile(export_all).
+-include_lib("eunit/include/eunit.hrl").
 
 -include("couch_db.hrl").
 
