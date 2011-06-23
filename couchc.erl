@@ -24,7 +24,9 @@
          delete_doc/2, delete_doc/3,
          save_docs/2, save_docs/3,
          delete_docs/2, delete_docs/3,
-         db_exec/2, db_admin_exec/2]).
+         db_exec/2, db_admin_exec/2,
+         all/1, all/2, all/3,
+         fold/2, fold/3, fold/4]).
 
 
 get_uuid() ->
@@ -324,7 +326,6 @@ delete_doc(Db, {DocProps}, Options) ->
 save_docs(Db, Docs) ->
     save_docs(Db, Docs, []).
 
-
 %% @doc
 %% options = replicated_changes, all_or_nothing, delay_commit,
 %% full_commmit
@@ -388,6 +389,144 @@ delete_docs(Db, Docs, Options) ->
         end, Docs),
     save_docs(Db, Docs0, Options).
 
+all(Db) ->
+    all(Db, 'docs').
+
+all(Db, ViewName) ->
+    all(Db, ViewName, []).
+
+all(Db, ViewName, Options) ->
+    fold(Db, ViewName, fun collect_results/2, Options).
+
+
+fold(Db, Fun) ->
+    fold(Db, 'docs', Fun, []).
+
+fold(Db, ViewName, Fun) ->
+    fold(Db, ViewName, Fun, []).
+
+fold(Db, 'docs', Fun, Options) ->
+    Keys = proplists:get_value(keys, Options, nil),
+    QueryArgs = proplists:get_value(query_args, Options,
+        #view_query_args{}),
+
+    #view_query_args{
+            limit = Limit,
+            skip = SkipCount,
+            stale = _Stale,
+            direction = Dir,
+            group_level = _GroupLevel,
+            start_key = StartKey,
+            start_docid = StartDocId,
+            end_key = EndKey,
+            end_docid = EndDocId,
+            inclusive_end = Inclusive
+    } = QueryArgs,
+    
+    db_exec(Db, fun(Db0) ->
+        {ok, Info} = couch_db:get_db_info(Db0),
+        TotalRowCount = proplists:get_value(doc_count, Info),
+        StartId = if is_binary(StartKey) -> StartKey;
+                true -> StartDocId
+            end,
+        EndId = if is_binary(EndKey) -> EndKey;
+                true -> EndDocId
+            end,
+        FoldAccInit = {Limit, SkipCount, undefined, []},
+        UpdateSeq = couch_db:get_update_seq(Db0),
+
+        case Keys of
+        nil ->
+            FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs,
+                <<"">>, Db0,
+                UpdateSeq, TotalRowCount, #view_fold_helper_funs{
+                    reduce_count = fun couch_db:enum_docs_reduce_to_count/1,
+                    start_response = fun start_map_view_fold_fun/6,
+                    send_row = make_docs_row_fold_fun(Fun)
+                }),
+            AdapterFun = fun(#full_doc_info{id=Id}=FullDocInfo, Offset, Acc) ->
+                case couch_doc:to_doc_info(FullDocInfo) of
+                    #doc_info{revs=[#rev_info{deleted=false}|_]} = DocInfo ->
+                        FoldlFun({{Id, Id}, DocInfo}, Offset, Acc);
+                    #doc_info{revs=[#rev_info{deleted=true}|_]} ->
+                        {ok, Acc}
+                end
+            end,
+            {ok, LastOffset, FoldResult} = couch_db:enum_docs(Db0,
+                AdapterFun, FoldAccInit, [{start_key, StartId}, {dir, Dir},
+                    {if Inclusive -> end_key; true -> end_key_gt end, EndId}]),
+            finish_view_fold(TotalRowCount, LastOffset, FoldResult);
+        _ ->
+            FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs,
+                <<"">>, Db0,
+                UpdateSeq, TotalRowCount, #view_fold_helper_funs{
+                    reduce_count = fun(Offset) -> Offset end,
+                    start_response = fun start_map_view_fold_fun/6,
+                    send_row = make_docs_row_fold_fun(Fun)
+                }),
+            KeyFoldFun = case Dir of
+            fwd ->
+                fun lists:foldl/3;
+            rev ->
+                fun lists:foldr/3
+            end,
+
+            FoldResult = KeyFoldFun(
+                fun(Key, FoldAcc) ->
+                    DocInfo = (catch couch_db:get_doc_info(Db0, Key)),
+                    Doc = case DocInfo of
+                    {ok, #doc_info{id = Id} = Di} ->
+                        {{Id, Id}, Di};
+                    not_found ->
+                        {{Key, error}, not_found};
+                    _ ->
+                        ?LOG_ERROR("Invalid DocInfo: ~p", [DocInfo]),
+                        throw({error, invalid_doc_info})
+                    end,
+                    {_, FoldAcc2} = FoldlFun(Doc, 0, FoldAcc),
+                    FoldAcc2
+                end, FoldAccInit, Keys),
+            finish_view_fold(TotalRowCount, 0, FoldResult)
+        end
+
+    end);
+%% options [{reduce, true}, {keys, nil}, 
+%%          {query_args, #view_query_args{}}]
+fold(Db, {DName, VName}, Fun, Options) ->
+    DName1 = couch_util:to_binary(DName),
+    VName1 = couch_util:to_binary(VName),
+    DesignId = <<"_design/", DName1/binary>>,
+    Keys = proplists:get_value(keys, Options, nil),
+    QueryArgs = proplists:get_value(query_args, Options,
+        #view_query_args{}),
+
+    #view_query_args{
+        stale=Stale} = QueryArgs,
+    Reduce = get_reduce_type(Options),
+    db_exec(Db, fun(Db0) ->
+        case couch_view:get_map_view(Db0, DesignId, VName1, Stale) of
+            {ok, View, Group} ->
+                fold_map_view(View, Group, Fun, Db0, QueryArgs, Keys);
+            {not_found, Reason} ->
+                case couch_view:get_reduce_view(Db, DesignId, VName1, Stale) of
+                {ok, ReduceView, Group} ->
+                    case Reduce of
+                    false ->
+                        MapView =
+                        couch_view:extract_map_view(ReduceView),
+                        fold_map_view(MapView, Group, Fun, Db0, QueryArgs, Keys);
+                    _ ->
+                        fold_reduce_view(ReduceView, Group, Fun, Db0,
+                            QueryArgs, Keys)
+                    end;
+                _ ->
+                    {error, {not_found, Reason}}
+                end
+        end
+    end);
+fold(_, _, _, _) ->
+    {error, {bad_view_name, <<"bad view name">>}}.
+
 %% utility functions
 
 db_exec(#cdb{name=DbName,options=Options}, Fun) ->
@@ -412,6 +551,162 @@ db_admin_exec(Db, Fun) ->
     end).
 
 %% private functions
+fold_map_view(View, Group, Fun, Db, QueryArgs, nil) ->
+    #view_query_args{
+        limit = Limit,
+        skip = SkipCount
+    } = QueryArgs,
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View),
+    {ok, RowCount} = couch_view:get_row_count(View),
+    FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs,
+        CurrentEtag, Db, Group#group.current_seq, RowCount, 
+        #view_fold_helper_funs{
+            reduce_count=fun couch_view:reduce_to_count/1,
+            start_response = fun start_map_view_fold_fun/6,
+            send_row = make_map_row_fold_fun(Fun)}),
+    FoldAccInit = {Limit, SkipCount, undefined, []},
+    {ok, _LastReduce, FoldResult} = couch_view:fold(View,
+        FoldlFun, FoldAccInit, couch_httpd_view:make_key_options(QueryArgs)),
+
+    {_, _, _, {Offset, ViewFoldAcc}} = FoldResult,
+    {ok, {RowCount, Offset, ViewFoldAcc}};
+fold_map_view(View, Group, Fun, Db, QueryArgs, Keys) ->
+    #view_query_args{
+        limit = Limit,
+        skip = SkipCount
+    } = QueryArgs,
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, Keys),
+    {ok, RowCount} = couch_view:get_row_count(View),
+    FoldAccInit = {Limit, SkipCount, undefined, []},
+    {_LastReduce, FoldResult} = lists:foldl(fun(Key, {_, FoldAcc}) ->
+        FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs#view_query_args{},
+                CurrentEtag, Db, Group#group.current_seq, RowCount,
+                #view_fold_helper_funs{
+                    reduce_count = fun couch_view:reduce_to_count/1,
+                    start_response = fun start_map_view_fold_fun/6,
+                    send_row = make_map_row_fold_fun(Fun)
+                }),
+        {ok, LastReduce, FoldResult} = couch_view:fold(View, FoldlFun,
+                FoldAcc, couch_httpd_view:make_key_options(
+                     QueryArgs#view_query_args{start_key=Key, end_key=Key})),
+        {LastReduce, FoldResult}
+    end, {{[],[]}, FoldAccInit}, Keys),
+    {_, _, _, {Offset, ViewFoldAcc}} = FoldResult,
+    {ok, {RowCount, Offset, ViewFoldAcc}}.
+
+fold_reduce_view(View, Group, Fun, Db, QueryArgs, nil) ->
+    #view_query_args{
+        limit = Limit,
+        skip = Skip,
+        group_level = GroupLevel
+    } = QueryArgs,
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View),
+    {ok, GroupRowsFun, RespFun} = couch_httpd_view:make_reduce_fold_funs(nil, GroupLevel,
+                QueryArgs, CurrentEtag, Group#group.current_seq,
+                #reduce_fold_helper_funs{
+                    start_response = fun start_reduce_view_fold_fun/4,
+                    send_row = make_reduce_row_fold_fun(Fun)
+                }),
+    FoldAccInit = {Limit, Skip, undefined, []},
+    {ok, {_, _, _, AccResult}} = couch_view:fold_reduce(View,
+        RespFun, FoldAccInit, [{key_group_fun, GroupRowsFun} | 
+            couch_httpd_view:viewmake_key_options(QueryArgs)]),
+    {ok, AccResult};
+fold_reduce_view(View, Group, Fun, Db, QueryArgs, Keys) ->
+    #view_query_args{
+        limit = Limit,
+        skip = Skip,
+        group_level = GroupLevel
+    } = QueryArgs,
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, Keys),
+    {ok, GroupRowsFun, RespFun} = couch_httpd_view:make_reduce_fold_funs(nil, GroupLevel,
+                QueryArgs, CurrentEtag, Group#group.current_seq,
+                #reduce_fold_helper_funs{
+                    start_response = fun start_reduce_view_fold_fun/4,
+                    send_row = make_reduce_row_fold_fun(Fun)
+                }),
+    {_, RedAcc3} = lists:foldl(
+        fun(Key, {Resp, RedAcc}) ->
+            % run the reduce once for each key in keys, with limit etc
+            % reapplied for each key
+            FoldAccInit = {Limit, Skip, Resp, RedAcc},
+            {_, {_, _, Resp2, RedAcc2}} = couch_view:fold_reduce(View,
+                    RespFun, FoldAccInit, [{key_group_fun, GroupRowsFun} |
+                    couch_httpd_view:make_key_options(QueryArgs#view_query_args{
+                        start_key=Key, end_key=Key})]),
+            % Switch to comma
+            {Resp2, RedAcc2}
+        end,
+        {undefined, []}, Keys),
+     {ok, RedAcc3}.
+
+
+get_reduce_type(Options) ->
+    case proplists:get_value(reduce, Options) of
+        {reduce, false} ->
+            false;
+        _ ->
+            true
+    end.
+
+start_reduce_view_fold_fun(_Req, _Etag, _Acc0, _UpdateSeq) ->
+    {ok, nil, []}.
+
+make_reduce_row_fold_fun(ViewFoldFun) ->
+    fun(_Resp, {Key, Value}, Acc) ->
+        {Go, NewAcc} = ViewFoldFun({Key, Value}, Acc),
+        {Go, NewAcc}
+    end.
+
+finish_view_fold(TotalRows, Offset, FoldResult) ->
+    {_, _, _, {_, _, AccResult}} = FoldResult,
+    {ok, {TotalRows, Offset, AccResult}}.
+
+start_map_view_fold_fun(_Req, _Etag, TotalViewCount, Offset, _Acc, _UpdateSeq) ->
+    {ok, nil, {TotalViewCount, Offset, []}}.
+
+
+make_map_row_fold_fun(ViewFoldFun) ->
+    fun(_Resp, Db, {{Key, DocId}, _}=KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
+        JsonObj = couch_httpd_view:view_row_obj(Db, KV, IncludeDocs,
+            Conflicts),
+        {Go, NewAcc} = ViewFoldFun({{Key, DocId}, JsonObj}, Acc),
+        {Go, {TotalViewCount, Offset, NewAcc}}
+    end.
+
+make_docs_row_fold_fun(ViewFoldFun) ->
+    fun(_Resp, Db, {{Key, DocId}, _}=KV, IncludeDocs, Conflicts, {TotalViewCount, Offset, Acc}) ->
+        JsonObj = all_docs_view_row_obj(Db, KV, IncludeDocs,
+            Conflicts),
+        {Go, NewAcc} = ViewFoldFun({{Key, DocId}, JsonObj}, Acc),
+        {Go, {TotalViewCount, Offset, NewAcc}}
+    end.
+
+all_docs_view_row_obj(_Db, {{DocId, error}, Value}, _IncludeDocs, _Conflicts) ->
+    {[{key, DocId}, {error, Value}]};
+all_docs_view_row_obj(Db, {_KeyDocId, DocInfo}, true, Conflicts) ->
+    case DocInfo of
+    #doc_info{revs = [#rev_info{deleted = true} | _]} ->
+        {all_docs_row(DocInfo) ++ [{doc, null}]};
+    _ ->
+        {all_docs_row(DocInfo) ++ couch_httpd_view:doc_member(
+            Db, DocInfo, if Conflicts -> [conflicts]; true -> [] end)}
+    end;
+all_docs_view_row_obj(_Db, {_KeyDocId, DocInfo}, _IncludeDocs, _Conflicts) ->
+    {all_docs_row(DocInfo)}.
+
+all_docs_row(#doc_info{id = Id, revs = [RevInfo | _]}) ->
+    #rev_info{rev = Rev, deleted = Del} = RevInfo,
+    [ {id, Id}, {key, Id},
+        {value, {[{rev, couch_doc:rev_to_str(Rev)}] ++ case Del of
+            true -> [{deleted, true}];
+            false -> []
+            end}} ].
+
+
+collect_results(Row, Acc) ->
+    {ok, [Row | Acc]}.
+    
 
 parse_ids_revs(IdsRevs) ->
     [{Id, couch_doc:parse_revs(Revs)} || {Id, Revs} <- IdsRevs].
