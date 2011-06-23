@@ -1,12 +1,18 @@
 # couchc
 
-Simple CouchDB API internal wrapper.
+Simple CouchDB API internal wrapper. 
 
+This library wrap CouchDB intenal API in simple call to help you in
+building CouchDB plugings.
+
+This api is compatible with CouchDb 1.1.x and trunk (1.2.x) .
 
 ## Build
 
     $ export COUCHDB_SRC=/path/to/sources/src/couchdb
     $ erlc -I $COUCHDB_SRC *.erl
+
+Note: Move it in couchdb beam folder if you want to use it easily.
 
 ## Test it
 
