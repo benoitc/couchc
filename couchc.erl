@@ -22,6 +22,8 @@
          open_doc/2, open_doc/3, open_doc_rev/4,
          save_doc/2, save_doc/3,
          delete_doc/2, delete_doc/3,
+         save_docs/2, save_docs/3,
+         delete_docs/2, delete_docs/3,
          db_exec/2, db_admin_exec/2]).
 
 
@@ -319,13 +321,72 @@ delete_doc(Db, {DocProps}, Options) ->
     save_doc(Db, Doc, Options).
 
 
+save_docs(Db, Docs) ->
+    save_docs(Db, Docs, []).
 
-%%save_docs(Db, Docs) ->
-%%    save_docs(Db, Docs, []).
 
-%%save_docs(Db, Docs, Options) ->
-%%    Docs1 = [maybe_docid(Doc) || Doc <- Docs],
-%%    ok. 
+%% @doc
+%% options = replicated_changes, all_or_nothing, delay_commit,
+%% full_commmit
+save_docs(Db, Docs, Options) ->
+    db_exec(Db, fun(Db0) ->
+        case proplists:get_value(replicated_changes, Options) of
+            true ->
+                Docs1 = lists:map(fun(JsonObj) ->
+                        Doc = couch_doc:from_json_obj(JsonObj),
+                        validate_attachment_names(Doc),
+                        Doc
+                    end, Docs),
+                Options1 = proplists:delete(all_or_nothing, Options),
+                {ok, Errors} = couch_db:update_docs(Db0, Docs1, Options1, 
+                    replicated_changes),
+                lists:map(fun couch_httpd_db:update_doc_result_to_json/1, 
+                    Errors);
+            _ ->
+                Docs1 = lists:map(fun({ObjProps} = JsonObj) ->
+                        Doc = couch_doc:from_json_obj(JsonObj),
+                        validate_attachment_names(Doc),
+                        Id = case Doc#doc.id of
+                            <<>> -> couch_uuids:new();
+                            Id0 -> Id0
+                        end,
+                        case couch_util:get_value(<<"_rev">>, ObjProps) of
+                        undefined ->
+                           Revs = {0, []};
+                        Rev  ->
+                            {Pos, RevId} = couch_doc:parse_rev(Rev),
+                            Revs = {Pos, [RevId]}
+                        end,
+                        Doc#doc{id=Id,revs=Revs}
+                    end, Docs),
+                case couch_db:update_docs(Db0, Docs1, Options) of
+                    {ok, Results} ->
+                        lists:zipwith(fun couch_httpd_db:update_doc_result_to_json/2,
+                            Docs1, Results);
+                    {aborted, Errors} ->
+                        lists:map(fun couch_httpd_db:update_doc_result_to_json/1, 
+                            Errors)
+                end
+        end
+    end).
+
+delete_docs(Db, Docs) ->
+    delete_docs(Db, Docs, []).
+
+delete_docs(Db, Docs, Options) ->
+    Docs0 = lists:map(fun(Doc) ->
+            case Doc of 
+                {DocId, DocRev} 
+                when is_binary(DocId) andalso is_binary(DocRev) ->
+                    {[
+                    {<<"_id">>, DocId},
+                    {<<"_rev">>, DocRev},
+                    {<<"_deleted">>, true}]};
+                {DocProps} ->
+                    {[{<<"_deleted">>, true}|DocProps]}
+            end
+        end, Docs),
+    save_docs(Db, Docs0, Options).
 
 %% utility functions
 
@@ -354,14 +415,6 @@ db_admin_exec(Db, Fun) ->
 
 parse_ids_revs(IdsRevs) ->
     [{Id, couch_doc:parse_revs(Revs)} || {Id, Revs} <- IdsRevs].
-
-maybe_docid({DocProps}=Doc) ->
-    case couch_util:get_value(<<"_id">>, DocProps) of
-        undefined ->
-            {[{<<"_id">>, get_uuid()}|DocProps]};
-        _ ->
-            Doc
-    end.
 
 dbname(DbName) ->
     couch_util:to_binary(DbName).
