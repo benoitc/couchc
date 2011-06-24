@@ -120,12 +120,20 @@ view_test() ->
         DesignDoc = {[
             {<<"_id">>, <<"_design/test">>},
             {<<"language">>,<<"javascript">>},
-            {<<"views">>,
-                {[{<<"v1">>,
+            {<<"views">>,{[
+                {<<"v1">>,
                     {[{<<"map">>,
                         <<"function (doc) {\n if (doc.t == \"test\") {\n emit(doc._id, doc);\n}\n}">>
                     }]}
-        }]}}]},
+                },
+                {<<"v2">>,{[{<<"map">>,
+                        <<"function (doc) {\n if (doc.t == \"test\") {\n emit(doc._id, doc);\n}\n}">>
+                    },
+                    {<<"reduce">>, <<"_count">>}
+                ]}
+                }
+            ]}}
+        ]},
         Docs = [
             {[{<<"_id">>, <<"a">>}, {<<"v">>, 1}, {<<"t">>, <<"test">>}]},
             {[{<<"_id">>, <<"b">>}, {<<"v">>, 2}, {<<"t">>, <<"test">>}]}],
@@ -143,10 +151,30 @@ view_test() ->
         ?assert(DocId =/= undefined),        
         ?assert(lists:member(DocId, [<<"a">>, <<"b">>])),
 
+        %% test view 2 without reduce
+        Options = [{reduce, false}],
+        R1 = couchc:all(Db, {<<"test">>, <<"v2">>}, Options),
+
+        ?assertMatch({ok, {_, _, _}}, R1),
+        {ok, {TotalRowsCount2, Offset2, _Results2}} = R1,
+        ?assertEqual(2, TotalRowsCount2),
+        ?assertEqual(2, Offset2),
+
+        %% test view 2 with reduce
+        R2 = couchc:all(Db, {<<"test">>, <<"v2">>}),
+        ?assertMatch({ok,[{[{key,_},{value,_}]}]}, R2),
+        {ok,[{[{key, Key},{value,Value}]}]} = R2,
+        ?assertEqual(null, Key),
+        ?assertEqual(2, Value),
+
         {ok, Doc} = couchc:open_doc(Db, <<"a">>),
         {ok, _, _} = couchc:delete_doc(Db, Doc),
         {ok, {TotalRowsCount1, _, _}} = couchc:all(Db, {<<"test">>, <<"v1">>}),
         ?assertEqual(1, TotalRowsCount1)
+
+
+       
+
     end).
 
 

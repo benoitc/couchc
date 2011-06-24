@@ -513,7 +513,7 @@ fold(Db, {DName, VName}, Fun, Options) ->
             {ok, View, Group} ->
                 fold_map_view(View, Group, Fun, Db0, QueryArgs, Keys);
             {not_found, Reason} ->
-                case couch_view:get_reduce_view(Db, DesignId, VName1, Stale) of
+                case couch_view:get_reduce_view(Db0, DesignId, VName1, Stale) of
                 {ok, ReduceView, Group} ->
                     case Reduce of
                     false ->
@@ -614,7 +614,7 @@ fold_reduce_view(View, Group, Fun, Db, QueryArgs, nil) ->
     FoldAccInit = {Limit, Skip, undefined, []},
     {ok, {_, _, _, AccResult}} = couch_view:fold_reduce(View,
         RespFun, FoldAccInit, [{key_group_fun, GroupRowsFun} | 
-            couch_httpd_view:viewmake_key_options(QueryArgs)]),
+            couch_httpd_view:make_key_options(QueryArgs)]),
     {ok, AccResult};
 fold_reduce_view(View, Group, Fun, Db, QueryArgs, Keys) ->
     #view_query_args{
@@ -647,7 +647,7 @@ fold_reduce_view(View, Group, Fun, Db, QueryArgs, Keys) ->
 
 get_reduce_type(Options) ->
     case proplists:get_value(reduce, Options) of
-        {reduce, false} ->
+        false ->
             false;
         _ ->
             true
@@ -658,7 +658,7 @@ start_reduce_view_fold_fun(_Req, _Etag, _Acc0, _UpdateSeq) ->
 
 make_reduce_row_fold_fun(ViewFoldFun) ->
     fun(_Resp, {Key, Value}, Acc) ->
-        {Go, NewAcc} = ViewFoldFun({Key, Value}, Acc),
+        {Go, NewAcc} = ViewFoldFun({[{key, Key}, {value, Value}]}, Acc),
         {Go, NewAcc}
     end.
 
