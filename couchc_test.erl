@@ -11,6 +11,7 @@
 
 do_test(Fun) ->
     Options = [{user_ctx, #user_ctx{roles=[<<"_admin">>]}}],
+    catch (couchc:delete_db("couchc_testdb", Options)),
     {ok, Db} = couchc:create_db("couchc_testdb", Options),
     try
         Fun(Db)
@@ -178,4 +179,46 @@ view_test() ->
     end).
 
 
+attachments_001_test() ->
+    do_test(fun(Db) ->
+        {ok, DocId, _DocRev} = couchc:save_attachment(Db, <<"a">>,
+            <<"test.txt">>, <<"test">>),
 
+        {ok, Content, _} = couchc:open_attachment(Db, DocId,
+            <<"test.txt">>),
+
+        ?assertEqual(<<"test">>, Content),
+        {ok, DocId, _NewDocRev} = couchc:delete_attachment(Db, <<"a">>,
+            <<"test.txt">>),
+        Result = couchc:open_attachment(Db, DocId,
+            <<"test.txt">>),
+        ?assertEqual({error,{not_found,"Document is missing attachment"}}, Result)
+    end).
+
+attachments_002_test() ->
+    do_test(fun(Db) ->
+        {ok, DocId, DocRev} = couchc:save_doc(Db, {[]}),
+
+        {ok, DocId, DocRev1} =  couchc:save_attachment(Db, DocId,
+            <<"test.txt">>, <<"test">>, [{rev, DocRev}]),
+
+        {ok, Content, _} = couchc:open_attachment(Db, DocId,
+            <<"test.txt">>),
+
+        ?assertEqual(<<"test">>, Content),
+
+        {ok, DocId, _NewDocRev} = couchc:delete_attachment(Db, DocId,
+            <<"test.txt">>, [{rev, DocRev1}]),
+        
+        Result = couchc:open_attachment(Db, DocId,
+            <<"test.txt">>),
+        ?assertEqual({error,{not_found,"Document is missing attachment"}}, Result),
+
+        ?LOG_INFO("ici", []),
+        Result1 =  couchc:open_attachment(Db, DocId,
+            <<"test.txt">>, [{rev, DocRev1}]),
+        ?assertMatch({ok, _, _}, Result1),
+        {ok, Content1, _} = Result1,
+
+         ?assertEqual(<<"test">>, Content1)
+    end).
