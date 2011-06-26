@@ -878,7 +878,8 @@ save_attachment1(Db, DocId, FileName, NewAtt, Options) ->
                     FileName]
             },
             {ok, UpdatedRev} = couch_db:update_doc(Db, DocEdited, []),
-            {ok, DocId, UpdatedRev}
+            UpdatedRevStr = couch_doc:rev_to_str(UpdatedRev),
+            {ok, DocId, UpdatedRevStr}
     end.
 
 
