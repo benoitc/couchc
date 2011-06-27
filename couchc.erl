@@ -621,6 +621,8 @@ open_attachment_async(Db, DocId, FileName, Options) ->
 
                 end
             end;
+        {error, conflict} ->
+            {error, not_found};
         Error ->
             Error
     end.
@@ -666,7 +668,38 @@ save_attachment(Db, DocId, FileName, Payload, Options) ->
                 encoding = Encoding}],
 
     db_exec(Db, fun(Db0) ->
-        save_attachment1(Db0, DocId, FileName1, NewAtt, Options)
+        Result = case proplists:get_value(rev, Options) of
+            undefined ->
+                case couch_db:open_doc(Db0, DocId, Options) of
+                    {ok, Doc0} ->
+                        Doc0;
+                    _ ->
+                        #doc{id=DocId}
+                end;
+            Rev ->
+                Rev1 = couch_doc:parse_rev(Rev),
+                case couch_db:open_doc_revs(Db0, DocId, [Rev1], []) of
+                    {ok, [{ok, Doc0}]} -> 
+                        Doc0;
+                    {ok, [{{not_found, missing}, Rev1}]} -> 
+                        {error, conflict};
+                    {ok, [Error]} -> 
+                        {error, Error}
+                end
+        end,
+        case Result of
+            {error, _} = Error1 ->
+                Error1;
+            Doc ->
+                #doc{atts=Atts} = Doc,
+                DocEdited = Doc#doc{
+                    atts = NewAtt ++ [A || A <- Atts, A#att.name /=
+                        FileName1]
+                },
+                {ok, UpdatedRev} = couch_db:update_doc(Db0, DocEdited, []),
+                UpdatedRevStr = couch_doc:rev_to_str(UpdatedRev),
+                {ok, DocId, UpdatedRevStr}
+        end
     end).
 
 delete_attachment(Db, DocId, FileName) ->
@@ -674,10 +707,25 @@ delete_attachment(Db, DocId, FileName) ->
 
 delete_attachment(Db, DocId, FileName, Options) ->
     FileName1 = couch_util:to_binary(FileName),
+    Rev = proplists:get_value(rev, Options, nil),
+    DocId1 = couch_util:to_binary(DocId),
     NewAtt = [],
-    db_exec(Db, fun(Db0) ->
-        save_attachment1(Db0, DocId, FileName1, NewAtt, Options)
-    end).
+    
+    case open_doc_rev1(Db, DocId1, Rev, Options) of
+        {ok, Doc} ->
+            #doc{atts=Atts} = Doc,
+            DocEdited = Doc#doc{
+                atts = NewAtt ++ [A || A <- Atts, A#att.name /=
+                FileName1]
+            },
+            db_exec(Db, fun(Db0) ->
+                {ok, UpdatedRev} = couch_db:update_doc(Db0, DocEdited, []),
+                UpdatedRevStr = couch_doc:rev_to_str(UpdatedRev),
+                {ok, DocId, UpdatedRevStr}
+            end);
+        Error ->
+            Error
+    end.
 
 %% utility functionss
 
@@ -856,35 +904,6 @@ open_doc_rev1(Db, DocId, Rev, Options) ->
                 {error, Else}
         end
     end).
-
-
-save_attachment1(Db, DocId, FileName, NewAtt, Options) ->
-    Doc = case proplists:get_value(rev, Options) of
-        undefined ->
-            #doc{id=DocId};
-        Rev ->
-            case couch_db:open_doc_revs(Db, DocId, [Rev], []) of
-                {ok, [{ok, Doc0}]} -> 
-                    Doc0;
-                {ok, [{{not_found, missing}, Rev}]} -> 
-                    throw(conflict);
-                {ok, [Error]} -> 
-                    throw(Error)
-            end
-    end,
-    case Doc of
-        {error, Error1} ->
-            {error, Error1};
-        _ ->
-            #doc{atts=Atts} = Doc,
-            DocEdited = Doc#doc{
-                atts = NewAtt ++ [A || A <- Atts, A#att.name /=
-                    FileName]
-            },
-            {ok, UpdatedRev} = couch_db:update_doc(Db, DocEdited, []),
-            UpdatedRevStr = couch_doc:rev_to_str(UpdatedRev),
-            {ok, DocId, UpdatedRevStr}
-    end.
 
 
 fold_map_view(View, Group, Fun, Db, QueryArgs, nil) ->
