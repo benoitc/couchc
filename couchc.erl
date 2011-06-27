@@ -11,7 +11,8 @@
         name,
         options}).
 
--export([create_db/1, create_db/2, 
+-export([all_dbs/0, all_dbs/1, all_dbs/2,
+         create_db/1, create_db/2, 
          delete_db/1, delete_db/2,
          open_db/1, open_db/2,
          open_or_create_db/1, open_or_create_db/2,
@@ -46,6 +47,26 @@ get_uuid() ->
 
 get_uuids(Count) ->
     [couch_uuids:new() || _ <- lists:seq(1, Count)].
+
+all_dbs() ->
+    couch_server:all_databases().
+
+all_dbs(Fun) ->
+    all_dbs(Fun, []).
+
+all_dbs(Fun, Options) ->
+    {ok, DbNames} = couch_server:all_databases(),
+    lists:foldl(fun(DbName, Acc) ->
+        case couch_db:open(dbname(DbName), Options) of
+            {ok, Db} ->
+                {ok, Info} = couch_db:get_db_info(Db),
+                NewAcc = Fun({Info}, Acc),
+                couch_db:close(Db),
+                NewAcc;
+            _Error ->
+                Acc
+        end
+    end, [], DbNames).
 
 create_db(DbName) ->
     create_db(DbName, []).
@@ -98,7 +119,9 @@ open_or_create_db(DbName, Options) ->
 
 db_info(Db) ->
     db_exec(Db, fun(Db0) ->
-                couch_db:get_db_info(Db0)
+                {ok, Info} = couch_db:get_db_info(Db0),
+                %% we return a Json object
+                {ok, {Info}}
         end).
 
 ensure_full_commit(Db) ->
@@ -410,13 +433,11 @@ all(Db, ViewName) ->
 all(Db, ViewName, Options) ->
     fold(Db, ViewName, fun collect_results/2, Options).
 
-
 fold(Db, Fun) ->
     fold(Db, 'docs', Fun, []).
 
 fold(Db, ViewName, Fun) ->
     fold(Db, ViewName, Fun, []).
-
 fold(Db, 'docs', Fun, Options) ->
     Keys = proplists:get_value(keys, Options, nil),
     QueryArgs = proplists:get_value(query_args, Options,
