@@ -8,7 +8,6 @@
 -include("couch_db.hrl").
 -include("couchc.hrl").
 
-
 -export([all_dbs/0, all_dbs/1, all_dbs/2,
          create_db/1, create_db/2, 
          delete_db/1, delete_db/2,
@@ -45,7 +44,7 @@
 get_uuid() ->
     couch_uuids:new().
 
--spec get_uuids(integer()) -> list(binary()).
+-spec get_uuids(Count::integer()) -> list(binary()).
 %% @doc return a list of generated uuid
 get_uuids(Count) ->
     [couch_uuids:new() || _ <- lists:seq(1, Count)].
@@ -55,20 +54,20 @@ get_uuids(Count) ->
 all_dbs() ->
     couch_server:all_databases().
 
--spec all_dbs(function()) -> iolist().
+-spec all_dbs(Fun::function()) -> iolist().
+%% @equiv  all_dbs(Fun, [])
+all_dbs(Fun) ->
+    all_dbs(Fun, []).
+
+-spec all_dbs(Fun::function(), Options::db_options()) -> iolist().
 %% @doc fold list of database names in function Fun
 %% ex:
 %%      Fun = fun({PInfo} = Info, Acc) ->
 %%          DbName = proplist:get(db_name, PInfo),
 %%          [{DbName, Info}|Acc]
 %%      end,
-%%      all_dbs(Fun)
+%%      all_dbs(Fun, [])
 %% will return a list of tuple (DbName, DbInfo)
-all_dbs(Fun) ->
-    all_dbs(Fun, []).
-
--spec all_dbs(function(), db_options()) -> iolist().
-%% @doc fold list of database names in function Fun
 all_dbs(Fun, Options) ->
     {ok, DbNames} = couch_server:all_databases(),
     lists:foldl(fun(DbName, Acc) ->
@@ -83,12 +82,12 @@ all_dbs(Fun, Options) ->
         end
     end, [], DbNames).
 
--spec create_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
-%% @doc create a database
+-spec create_db(DbName::db_name()) -> {ok, Db::db()}| {error, term()}.
+%% @equiv create_db(DbName, [])
 create_db(DbName) ->
     create_db(DbName, []).
 
--spec create_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+-spec create_db(DbName::db_name(), Options::db_options()) -> {ok, Db::db()}| {error, term()}.
 %% @doc create a database
 create_db(DbName, Options) ->
     case couch_server:create(dbname(DbName), Options) of
@@ -99,12 +98,12 @@ create_db(DbName, Options) ->
             {error, Error}
     end.
 
--spec delete_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
-%% @doc delete a database
+-spec delete_db(DbName::db_name()) -> ok | {error, term()}.
+%% @equiv delete_db(DbName, [])
 delete_db(DbName) ->
     delete_db(DbName, []).
 
--spec delete_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+-spec delete_db(DbName::db_name(), Options::db_options()) -> ok| {error, term()}.
 %% @doc delete a database
 delete_db(DbName, Options) ->
     case couch_server:delete(dbname(DbName), Options) of
@@ -114,12 +113,12 @@ delete_db(DbName, Options) ->
             {error, Error}
     end.
 
--spec open_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
-%% @doc open an existing database
+-spec open_db(DbName::db_name()) -> {ok, Db::db()}| {error, term()}.
+%% @equiv open_db(DbName, [])
 open_db(DbName) ->
     open_db(DbName, []).
 
--spec open_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+-spec open_db(DbName::db_name(), Options::db_options()) -> {ok, Db::db()}| {error, term()}.
 %% @doc open an existing database
 open_db(DbName, Options) ->
     case couch_db:open(dbname(DbName), Options) of
@@ -131,12 +130,12 @@ open_db(DbName, Options) ->
     end.
 
 
--spec open_or_create_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
-%% @doc open or create a database
+-spec open_or_create_db(DbName::db_name()) -> {ok, Db::db()}| {error, term()}.
+    %% @equiv open_db(DbName, [])
 open_or_create_db(DbName) ->
     open_or_create_db(DbName, []).
 
--spec open_or_create_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+-spec open_or_create_db(DbName::db_name(), Options::db_options()) -> {ok, Db::db()}| {error, term()}.
 %% @doc open or create a database
 open_or_create_db(DbName, Options) ->
     case create_db(DbName, Options) of
@@ -148,7 +147,7 @@ open_or_create_db(DbName, Options) ->
             Error
     end.
 
--spec db_info(#cdb{}) -> {ok, ejson_object()}.
+-spec db_info(Db::db()) -> {ok, ejson_object()}.
 %% @doc return db info object
 db_info(Db) ->
     db_exec(Db, fun(Db0) ->
@@ -157,9 +156,13 @@ db_info(Db) ->
                 {ok, {Info}}
         end).
 
+-spec ensure_full_commit(Db::db()) -> {ok, StartTime::integer()} | {error, term()}.
+%% @equiv ensure_full_commit(Db, [])
 ensure_full_commit(Db) ->
     ensure_full_commit(Db, []).
 
+-spec ensure_full_commit(Db::db(), Options::db_options()) -> {ok, StartTime::integer()} | {error, term()}.
+%% @doc commit all docs in memory
 ensure_full_commit(Db, Options) ->
     db_exec(Db, fun(Db0) ->
         UpdateSeq = couch_db:get_update_seq(Db0),
@@ -181,6 +184,11 @@ ensure_full_commit(Db, Options) ->
         end
     end).
 
+-spec purge_docs(Db::db(), IdsRevs::list({DocId::binary(),
+            Rev::binary()})) -> {ok, PurgeSeq::integer(),
+            PurgedIdsRevs2::list({DocId1::binary(),
+                    Rev1::binary()})} | {error, term()}.
+%% @doc purge a list of revision per documents
 purge_docs(Db, IdsRevs) ->
     IdsRevs2 = parse_ids_revs(IdsRevs),
     db_exec(Db, fun(Db0) ->
@@ -195,27 +203,47 @@ purge_docs(Db, IdsRevs) ->
     end).
 
 
+-spec db_set_security(Db::db(), SecObj::ejson_object()) -> ok | {error,
+        term()}.
+%% @doc set database security object
 db_set_security(Db, SecObj) ->
-    db_exec(Db, fun(Db0) ->
-                couch_db:set_security(Db0, SecObj)
+    db_admin_exec(Db, fun(Db0) ->
+                try
+                    couch_db:set_security(Db0, SecObj)
+                catch
+                    _:Error -> {error, Error}
+                end
         end).
 
+-spec db_get_security(Db::db()) -> ejson_object().
+%% @doc return database security object
 db_get_security(Db) ->
     db_exec(Db, fun(Db0) ->
                 couch_db:get_security(Db0)
         end).
 
+-spec db_set_revs_limit(Db::db(), Limit::integer()) -> ok | {error,
+        term()}.
+%% @doc set number of revision / doc to keep in database
 db_set_revs_limit(Db, Limit) ->
-    db_exec(Db, fun(Db0) ->
-                couch_db:set_revs_limit(Db0, Limit)
+    db_admin_exec(Db, fun(Db0) ->
+                try
+                    couch_db:set_revs_limit(Db0, Limit)
+                catch
+                    _:Error -> {error, Error}
+                end
         end).
 
+-spec db_get_revs_limit(Db::db()) -> integer().
+%% @doc get number of revision / doc to keep in database
 db_get_revs_limit(Db) ->
     db_exec(Db, fun(Db0) ->
                 couch_db:get_revs_limit(Db0)
         end).
 
-
+-spec db_missing_revs(Db::db(), IdsRevs::list({DocId::binary,
+            DocRev::binary})) -> {ok, term()}.
+%% @doc get missing revs
 db_missing_revs(Db, IdsRevs) ->
     IdsRevs2 = parse_ids_revs(IdsRevs),
     db_exec(Db, fun(Db0) ->
@@ -225,6 +253,8 @@ db_missing_revs(Db, IdsRevs) ->
         {ok, Results2}
     end).
 
+-spec db_revs_diff(Db::db(), IdsRevs::list({DocId::binary,
+            DocRev::binary})) -> {ok, term()}.
 db_revs_diff(Db, IdsRevs) ->
     IdsRevs2 = parse_ids_revs(IdsRevs),
     db_exec(Db, fun(Db0) ->
@@ -243,33 +273,42 @@ db_revs_diff(Db, IdsRevs) ->
         {ok, Results2}
     end).
        
-
+-spec compact(Db::db()) -> ok.
+%% @doc start to compact db.
 compact(Db) ->
     db_admin_exec(Db, fun(Db0) ->
         couch_db:start_compact(Db0)
     end).
 
+-spec compact(Db::db(), DName::binary()) -> ok.
+%% @doc start to compact view in ddoc.
 compact(#cdb{name=DbName}=Db, DName) ->
     db_admin_exec(Db, fun(_) ->
         couch_view_compactor:start_compact(dbname(DbName),
                     couch_util:to_binary(DName))
     end).
 
+-spec view_cleanup(Db::db()) -> ok.
+%% @doc clean up index files of a db
 view_cleanup(Db) ->
     db_admin_exec(Db, fun(Db0) ->
         couch_view:cleanup_index_files(Db0)
     end).
 
+-spec open_doc(Db::db(), DocId::docid()) -> {ok,Doc::ejson_object()} |
+    {error, term()}.
+%% @equiv open_doc(Db, DocId, [])
 open_doc(Db, DocId) ->
     open_doc(Db, DocId, []).
 
-%% @doc
 
+
+-spec open_doc(Db::db(), DocId::docid(), Options::doc_options()) -> {ok,
+        Doc::ejson_object()} | {error, term()}.
+%% @doc open a document with DocId, return DocId and last revision.
 %% Options = [revs, revs_info, conflicts, deleted_conflicts, local_seq,
 %%            latest, att_encoding_info, {atts_since, RevList}, 
 %%            attachments]
-
-
 open_doc(Db, DocId, Options) ->
     DocId1 = couch_util:to_binary(DocId),
     Rev = proplists:get_value(rev, Options, nil),
@@ -302,7 +341,10 @@ open_doc(Db, DocId, Options) ->
             end)
     end.
 
-
+-spec open_doc_rev(Db::db(), DocId::docid(), Rev::nil | binary(),
+    Options::doc_options()) -> {ok, Doc::ejson_object()} | {error,
+        term()}.
+%% @doc open a doc with its Doc id and revision.
 open_doc_rev(Db, DocId, nil, Options) ->
     db_exec(Db, fun(Db0) ->
         case couch_db:open_doc(Db0, DocId, Options) of
@@ -326,11 +368,31 @@ open_doc_rev(Db, DocId, Rev, Options) ->
         end
     end).
 
+-spec save_doc(Db::db(), Doc::ejson_object()) -> {ok, DocId::binary(),
+        Rev::binary()} | {error, term()}.
+%% @equiv save_doc(Db, Doc, []).
 save_doc(Db, Doc) ->
     save_doc(Db, Doc, []).
 
-%% options [batch, {update_type, UpdateType}, full_commit, delay_commit]
-%% updare_types = replicated_changes, interactive_edit, 
+
+-spec save_doc(Db::db(), Doc::ejson_object(), 
+    Options::update_options()) -> {ok, DocId::binary(), Rev::binary()} | {error, term()}.
+%% @doc create or update a document. 
+%% A document is a Json object like this one:
+%%      
+%%      ```{[
+%%          {<<"_id">>, <<"myid">>},
+%%          {<<"title">>, <<"test">>}
+%%      ]}'''
+%%
+%% Options are arguments passed to the request. This function return a
+%% new document with last revision and a docid. If _id isn't specified in
+%% document it will be created. Id is created by extracting an uuid from
+%% the couchdb node.
+%%
+%% update_options [batch, {update_type, UpdateType}, full_commit, delay_commit]
+%% updare_types = replicated_changes, interactive_edit
+%%
 save_doc(Db, {DocProps}=Doc, Options) ->
     %% get a new doc id or validate the existing.
     DocId = couch_util:get_value(<<"_id">>, DocProps),
@@ -374,11 +436,17 @@ save_doc(Db, {DocProps}=Doc, Options) ->
             end
     end.
 
-
+-spec delete_doc(Db::db(), Doc::ejson_object() | {DocId::binary(),
+        DocRev::binary()}) -> {ok, DocId::binary(),
+        Rev::binary()} | {error, term()}.
+%% @equiv delete_doc(Db, Doc, []).
 delete_doc(Db, Doc) ->
     delete_doc(Db, Doc, []).
 
-
+-spec delete_doc(Db::db(), Doc::ejson_object() | {DocId::binary(),
+        DocRev::binary()}, Options::update_options()) -> {ok,
+        DocId::binary(), Rev::binary()} | {error, term()}.
+%% delete a document
 delete_doc(Db, {DocId, DocRev}, Options)
         when is_binary(DocId) andalso is_binary(DocRev) ->
     Doc = {[
@@ -390,9 +458,17 @@ delete_doc(Db, {DocProps}, Options) ->
     Doc = {[{<<"_deleted">>, true}|DocProps]},
     save_doc(Db, Doc, Options).
 
+-spec copy_doc(Db::db(), SourceDocId::binary(), 
+    TargetDocId::binary()) -> {ok, TargetDocId::binary(),
+        TargetRev::binary()} | {error, term()}.
+%% @equiv copy_doc(Db, SourceDocId, TargetDocId, []).
 copy_doc(Db, SourceDocId, TargetDocId) ->
     copy_doc(Db, SourceDocId, TargetDocId, []).
 
+-spec copy_doc(Db::db(), SourceDocId::binary(), 
+    TargetDocId::binary(), Options::copy_options()) -> {ok, TargetDocId::binary(),
+        TargetRev::binary()} | {error, term()}.
+%% @doc copy a document from DocId to TargetId
 copy_doc(Db, SourceDocId, TargetDocId, Options) ->
     SourceRev = proplists:get_value(rev, Options, nil),
     TargetRev = proplists:get_value(target_rev, Options),
@@ -419,11 +495,16 @@ copy_doc(Db, SourceDocId, TargetDocId, Options) ->
     end.
 
 
-
+-spec save_docs(Db::db(), Docs::list(ejson_object())) -> {ok,
+        list({DocId::binary(), DocRev::binary()})} | {error, term()}.
+%% @equiv save_docs(Db, Docs, []).
 save_docs(Db, Docs) ->
     save_docs(Db, Docs, []).
 
-%% @doc
+-spec save_docs(Db::db(), Docs::list(ejson_object()),
+    Options::update_options()) -> {ok, list({DocId::binary(), 
+                DocRev::binary()})} | {error, term()}.
+%% @doc save multiple docs
 %% options = replicated_changes, all_or_nothing, delay_commit,
 %% full_commmit
 save_docs(Db, Docs, Options) ->
@@ -468,9 +549,16 @@ save_docs(Db, Docs, Options) ->
         end
     end).
 
+-spec delete_docs(Db::db(), Docs::list(ejson_object())) -> {ok,
+        list({DocId::binary(), DocRev::binary()})} | {error, term()}.
+%% @equiv save_docs(Db, Docs, []).
 delete_docs(Db, Docs) ->
     delete_docs(Db, Docs, []).
 
+-spec delete_docs(Db::db(), Docs::list(ejson_object() | {DocId::binary(),
+            DocRev::binary()}), Options::update_options()) -> {ok, list({DocId::binary(),
+            DocRev::binary()})} | {error, term()}.
+%% @doc like save_docs but delete multiples docs.
 delete_docs(Db, Docs, Options) ->
     Docs0 = lists:map(fun(Doc) ->
             case Doc of 
@@ -486,20 +574,39 @@ delete_docs(Db, Docs, Options) ->
         end, Docs),
     save_docs(Db, Docs0, Options).
 
+-spec all(Db::db()) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @doc get all docs
 all(Db) ->
     all(Db, 'docs').
+
+-spec all(Db::db(), ViewName:: 'docs' | {DesignName::binary(),
+        ViewName::binary()}) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @doc get all docs or all results from a view
 
 all(Db, ViewName) ->
     all(Db, ViewName, []).
 
+-spec all(Db::db(), ViewName:: 'docs' | {DesignName::binary(),
+        ViewName::binary()}, Options::view_options()) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @doc get all docs or all results from a view
 all(Db, ViewName, Options) ->
     fold(Db, ViewName, fun collect_results/2, Options).
 
+
+-spec fold(Db::db(), Fun::function()) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @doc fold all docs in a function fun(Doc, Acc)
 fold(Db, Fun) ->
     fold(Db, 'docs', Fun, []).
 
+-spec fold(Db::db(), ViewName::'docs' | {DesignName::binary(),
+        ViewName::binary()}, Fun::function()) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @equiv fold(Db, ViewName, Fun, []).
 fold(Db, ViewName, Fun) ->
     fold(Db, ViewName, Fun, []).
+
+-spec fold(Db::db(), ViewName::'docs' | {DesignName::binary(),
+        ViewName::binary()}, Fun::function(), Options::view_options()) -> {ok, Result::ejson_object()} | {error, term()}.
+%% @doc fold all docs in a function fun(Doc, Acc)
 fold(Db, 'docs', Fun, Options) ->
     Keys = proplists:get_value(keys, Options, nil),
     QueryArgs = proplists:get_value(query_args, Options,

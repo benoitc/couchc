@@ -222,3 +222,13 @@ attachments_002_test() ->
 
          ?assertEqual(<<"test">>, Content1)
     end).
+
+revs_limit_test() ->
+    do_test(fun(Db) ->
+        Limit = couchc:db_get_revs_limit(Db),
+        ?assertEqual(Limit, 1000),
+        Result = couchc:db_set_revs_limit(Db, 100),
+        ?assert(Result == ok), 
+        Limit1 = couchc:db_get_revs_limit(Db),
+        ?assertEqual(Limit1, 100)
+    end). 
