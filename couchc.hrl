@@ -46,6 +46,12 @@ deleted_conflicts | local_seq | latest | att_encoding_info| {atts_since, RevsLis
 
 -type view_options() :: list(view_option()).
 
+-type attachment_options() :: list(doc_options
+    | {ranges, list({From::integer(), To::integer()})}
+    | {accepted_encoding, list(gzip | encoding)}).
+
+-type body() :: iolist() | function().
+
 -record(cdb, {
         name,
         options :: db_options()}).

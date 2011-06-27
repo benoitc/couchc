@@ -729,10 +729,20 @@ fold(Db, {DName, VName}, Fun, Options) ->
 fold(_, _, _, _) ->
     {error, {bad_view_name, <<"bad view name">>}}.
 
-
+-spec open_attachment(Db::db(), DocId::docid(), FileName::binary()) ->
+    {ok, Bin::binary(), term()} | {ok, Bin::binary()} | {ok,
+        list({From::integer(), To::integer(), Type::binary(),
+                Bin::binary})} | {error, term()}.
+%% @equiv open_attachment(Db, DocId, FileName, [])
 open_attachment(Db, DocId, FileName) ->
     open_attachment(Db, DocId, FileName, []).
 
+-spec open_attachment(Db::db(), DocId::docid(), FileName::binary(),
+    Options::attachment_options()) ->
+    {ok, Bin::binary(), term()} | {ok, Bin::binary()} | {ok,
+        list({From::integer(), To::integer(), Type::binary(),
+                Bin::binary})} | {error, term()}.
+%% @doc open an attachment FileName in Doc with DocId
 open_attachment(Db, DocId, FileName, Options) ->
     case open_attachment_async(Db, DocId, FileName, Options) of
         {ok, Pid, ranges} ->
@@ -744,10 +754,22 @@ open_attachment(Db, DocId, FileName, Options) ->
         Error ->
             Error
     end.
-   
+
+-spec open_attachment_async(Db::db(), DocId::docid(), FileName::binary()) ->
+    {ok, Pid::pid(), term()} | {ok, Pid::pid()} | {error, term()}.
+%% @equiv open_attachment_async(Db, DocId, FileName, [])
 open_attachment_async(Db, DocId, FileName) ->
     open_attachment_async(Db, DocId, FileName, []).
 
+
+-spec open_attachment_async(Db::db(), DocId::docid(),
+    FileName::binary(), Options::attachment_options()) ->
+     {ok, Pid::pid(), ranges} | {ok, Pid::pid(), term()} | {ok,
+         Pid::pid()} | {error, term()}.
+%% @doc get an attachment asynchronously
+%% Use get_attachment_part(Pid::pid()) to get attachment part. If you
+%% specified ranges in options, the returned response is {ok, Pid,
+%% ranges}
 open_attachment_async(Db, DocId, FileName, Options) ->
     FileName1 = couch_util:to_binary(FileName),
     Rev = proplists:get_value(rev, Options, nil),
@@ -817,9 +839,37 @@ open_attachment_async(Db, DocId, FileName, Options) ->
             Error
     end.
 
+
+-spec get_attachment_part(Pid::pid()) -> {ok, done}
+    | {ok, {new_range, {Type::binary(), From::integer(), To::integer(),Len::integer}}} 
+    | {ok, {range_part, {{From::integer(), To::integer(), Type::binary(), Len::integer()}, Bin::binary(), BinSize::integer()}}}
+    | {ok, {Bin::binary(), BinSize::binary()}}.
+%% @equiv get_attachment_part(Pid, infinity).
 get_attachment_part(Pid) ->
     get_attachment_part(Pid, infinity).
 
+
+-spec get_attachment_part(Pid::pid(), Timeout::infinity | integer()) -> {ok, done}
+    | {ok, {new_range, {Type::binary(), From::integer(), To::integer(),  Len::integer}}} 
+    | {ok, {range_part, {{From::integer(), To::integer(), Type::binary(), Len::integer()}, Bin::binary(), BinSize::integer()}}}
+    | {ok, {Bin::binary(), BinSize::binary()}}.
+%% @doc stream fetch attachment to a Pid. Messages  
+%%      will be of the form `{reference(), message()}',
+%%      where `message()' is one of:
+%%      <dl>
+%%          <dt>{ok, done}</dt>
+%%              <dd>You got all the attachment</dd>
+%%          <dt>{ok, {Bin::binary(), BinSize::binary()}}</dt>
+%%              <dd>Part of the attachment with its size</dd>
+%%          <dt>{ok, {new_range, {Type::binary(), From::integer(), To::integer(),  Len::integer}}}</dt>
+%%              <dd>Get a new range info (when a range start</dd>
+%%          <dt>{ok, {range_part, {{From, To, Type, Len}, Bin::binary(), BinSize::integer()}}}</dt>
+%%              <dd>Get a new range part</dd>
+%%          <dt>{error, term()}</dt>
+%%              <dd>n error occurred</dd>
+%%      </dl>
+%% @spec stream_fetch_attachment(Db::db(), DocId::string(), Name::string(), 
+%%                               ClientPid::pid(), Options::list(), Timeout::integer())
 get_attachment_part(Pid, Timeout) ->
     Pid ! {ack, self()},
     receive
@@ -838,9 +888,17 @@ get_attachment_part(Pid, Timeout) ->
             kill_attachment_streamer(Pid)
     end.
 
+-spec save_attachment(Db::db(), DocId::binary(), FileName::binary(),
+    Payload::body()) -> {ok, DocId::binary(), DocRev::binary()} |
+    {error, term}.
+%% @equiv save_attachment(Db, DocId, FileName, Payload, []).
 save_attachment(Db, DocId, FileName, Payload) ->
     save_attachment(Db, DocId, FileName, Payload, []).
 
+-spec save_attachment(Db::db(), DocId::binary(), FileName::binary(),
+    Payload::body(), Options::update_options()) -> {ok, DocId::binary(), DocRev::binary()} |
+    {error, term}.
+%% @doc save an attachment
 save_attachment(Db, DocId, FileName, Payload, Options) ->
     FileName1 = couch_util:to_binary(FileName),
     CType = couch_util:to_binary(proplists:get_value(content_type, 
@@ -892,9 +950,16 @@ save_attachment(Db, DocId, FileName, Payload, Options) ->
         end
     end).
 
+-spec delete_attachment(Db::db(), DocId::binary(), FileName::binary()) ->
+    {ok, DocId::binary(), DocRev::binary()} | {error, term}.
+%% @equiv delete_attachment(Db, DocId, FileName, []).
 delete_attachment(Db, DocId, FileName) ->
     delete_attachment(Db, DocId, FileName, []).
 
+-spec delete_attachment(Db::db(), DocId::binary(), FileName::binary(),
+    Options::update_options()) ->
+    {ok, DocId::binary(), DocRev::binary()} | {error, term}.
+%% @doc delete an attachment
 delete_attachment(Db, DocId, FileName, Options) ->
     FileName1 = couch_util:to_binary(FileName),
     Rev = proplists:get_value(rev, Options, nil),
