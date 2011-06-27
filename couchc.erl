@@ -33,7 +33,7 @@
          all/1, all/2, all/3,
          fold/2, fold/3, fold/4,
          open_attachment/3, open_attachment/4,
-         open_attachment_async/4,
+         open_attachment_async/3, open_attachment_async/4,
          get_attachment_part/1, get_attachment_part/2,
          collect_attachment/1, collect_attachment/2,
          collect_attachment_ranges/1, collect_attachment_ranges/2,
@@ -554,7 +554,10 @@ open_attachment(Db, DocId, FileName, Options) ->
         Error ->
             Error
     end.
-    
+   
+open_attachment_async(Db, DocId, FileName) ->
+    open_attachment_async(Db, DocId, FileName, []).
+
 open_attachment_async(Db, DocId, FileName, Options) ->
     FileName1 = couch_util:to_binary(FileName),
     Rev = proplists:get_value(rev, Options, nil),
