@@ -28,6 +28,7 @@
          open_doc/2, open_doc/3, open_doc_rev/4,
          save_doc/2, save_doc/3,
          delete_doc/2, delete_doc/3,
+         copy_doc/3, copy_doc/4,
          save_docs/2, save_docs/3,
          delete_docs/2, delete_docs/3,
          db_exec/2, db_admin_exec/2,
@@ -356,6 +357,35 @@ delete_doc(Db, {DocId, DocRev}, Options)
 delete_doc(Db, {DocProps}, Options) ->
     Doc = {[{<<"_deleted">>, true}|DocProps]},
     save_doc(Db, Doc, Options).
+
+copy_doc(Db, SourceDocId, TargetDocId) ->
+    copy_doc(Db, SourceDocId, TargetDocId, []).
+
+copy_doc(Db, SourceDocId, TargetDocId, Options) ->
+    SourceRev = proplists:get_value(rev, Options, nil),
+    TargetRev = proplists:get_value(target_rev, Options),
+
+    case open_doc_rev1(Db, SourceDocId, SourceRev, Options) of
+        {ok, Doc} ->
+            db_exec(Db, fun(Db0) ->
+                TargetRev1 = case TargetRev of
+                    undefined ->
+                        {0, []};
+                    _ ->
+                        {Pos, RevId} = couch_doc:parse_rev(TargetRev),
+                        {Pos, [RevId]}
+                end,
+
+                {ok, NewTargetRev} = couch_db:update_doc(Db0,
+                    Doc#doc{id=TargetDocId, revs=TargetRev1}, []),
+
+                NewTargetRevStr = couch_doc:rev_to_str(NewTargetRev),
+                {ok, TargetDocId, NewTargetRevStr}
+            end);
+        Error ->
+            Error
+    end.
+
 
 
 save_docs(Db, Docs) ->
