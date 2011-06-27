@@ -598,13 +598,13 @@ open_attachment_async(Db, DocId, FileName, Options) ->
                                 Ranges = parse_ranges(proplists:get_value(ranges, Options), Len),
                                 case {Enc, Ranges} of
                                     {identity, Ranges} when is_list(Ranges) ->
-                                        {ok, Pid} = spawn(fun() ->
+                                        Pid = spawn(fun() ->
                                                     stream_attachment_ranges(Type,
                                                         Len, Att, Ranges) 
                                             end),
                                         {ok, Pid, ranges};
                                     _ ->
-                                        {ok, Pid} = spawn(fun() ->
+                                        Pid = spawn(fun() ->
                                                     stream_attachment(AttFun, Att) 
                                             end),
                                         if Enc =:= identity orelse AcceptsAttEnc =:= true ->
@@ -626,6 +626,7 @@ get_attachment_part(Pid) ->
     get_attachment_part(Pid, infinity).
 
 get_attachment_part(Pid, Timeout) ->
+    Pid ! {ack, self()},
     receive
         {attachment_done, Pid} ->
             {ok, done};
