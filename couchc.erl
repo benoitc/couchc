@@ -1,15 +1,13 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of couchbeam released under the MIT license. 
+%%% This file is part of couchc released under the MIT license. 
 %%% See the NOTICE for more information.
 
 -module(couchc).
 
 -include("couch_db.hrl").
+-include("couchc.hrl").
 
--record(cdb, {
-        name,
-        options}).
 
 -export([all_dbs/0, all_dbs/1, all_dbs/2,
          create_db/1, create_db/2, 
@@ -42,19 +40,35 @@
          save_attachment/4, save_attachment/5,
          delete_attachment/3, delete_attachment/4]).
 
-
+-spec get_uuid() -> binary().
+%% @doc get a generated uuid
 get_uuid() ->
     couch_uuids:new().
 
+-spec get_uuids(integer()) -> list(binary()).
+%% @doc return a list of generated uuid
 get_uuids(Count) ->
     [couch_uuids:new() || _ <- lists:seq(1, Count)].
 
+-spec all_dbs() -> list(binary()).
+%% @doc return list of database names
 all_dbs() ->
     couch_server:all_databases().
 
+-spec all_dbs(function()) -> iolist().
+%% @doc fold list of database names in function Fun
+%% ex:
+%%      Fun = fun({PInfo} = Info, Acc) ->
+%%          DbName = proplist:get(db_name, PInfo),
+%%          [{DbName, Info}|Acc]
+%%      end,
+%%      all_dbs(Fun)
+%% will return a list of tuple (DbName, DbInfo)
 all_dbs(Fun) ->
     all_dbs(Fun, []).
 
+-spec all_dbs(function(), db_options()) -> iolist().
+%% @doc fold list of database names in function Fun
 all_dbs(Fun, Options) ->
     {ok, DbNames} = couch_server:all_databases(),
     lists:foldl(fun(DbName, Acc) ->
@@ -69,9 +83,13 @@ all_dbs(Fun, Options) ->
         end
     end, [], DbNames).
 
+-spec create_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc create a database
 create_db(DbName) ->
     create_db(DbName, []).
 
+-spec create_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc create a database
 create_db(DbName, Options) ->
     case couch_server:create(dbname(DbName), Options) of
         {ok, Db} ->
@@ -81,9 +99,13 @@ create_db(DbName, Options) ->
             {error, Error}
     end.
 
+-spec delete_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc delete a database
 delete_db(DbName) ->
     delete_db(DbName, []).
 
+-spec delete_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc delete a database
 delete_db(DbName, Options) ->
     case couch_server:delete(dbname(DbName), Options) of
         ok ->
@@ -92,10 +114,13 @@ delete_db(DbName, Options) ->
             {error, Error}
     end.
 
-
+-spec open_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc open an existing database
 open_db(DbName) ->
     open_db(DbName, []).
 
+-spec open_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc open an existing database
 open_db(DbName, Options) ->
     case couch_db:open(dbname(DbName), Options) of
         {ok, Db} ->
@@ -105,9 +130,14 @@ open_db(DbName, Options) ->
             {error, Error}
     end.
 
+
+-spec open_or_create_db(binary() | string()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc open or create a database
 open_or_create_db(DbName) ->
     open_or_create_db(DbName, []).
 
+-spec open_or_create_db(binary() | string(), db_options()) -> {ok, #cdb{}}| {error, term()}.
+%% @doc open or create a database
 open_or_create_db(DbName, Options) ->
     case create_db(DbName, Options) of
         {ok, Db} ->
@@ -118,6 +148,8 @@ open_or_create_db(DbName, Options) ->
             Error
     end.
 
+-spec db_info(#cdb{}) -> {ok, ejson_object()}.
+%% @doc return db info object
 db_info(Db) ->
     db_exec(Db, fun(Db0) ->
                 {ok, Info} = couch_db:get_db_info(Db0),
