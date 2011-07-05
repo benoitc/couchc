@@ -19,7 +19,6 @@ do_test(Fun) ->
         ok = couchc:delete_db("couchc_testdb", Options)
     end.
 
-
 createdb_test() ->
     {ok, Db} = couchc:create_db("couchc_testdb"),
     {ok, {Info}} = couchc:db_info(Db),

@@ -1,0 +1,5 @@
+
+{application, couchc,
+ [{description, "couchdb api internal wrapper"},
+  {vsn, git}
+]}.
