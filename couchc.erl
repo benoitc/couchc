@@ -1166,7 +1166,7 @@ fold_map_view(View, Group, Fun, Db, QueryArgs, nil) ->
         limit = Limit,
         skip = SkipCount
     } = QueryArgs,
-    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View),
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, QueryArgs, nil),
     {ok, RowCount} = couch_view:get_row_count(View),
     FoldlFun = couch_httpd_view:make_view_fold_fun(nil, QueryArgs,
         CurrentEtag, Db, Group#group.current_seq, RowCount, 
@@ -1184,7 +1184,7 @@ fold_map_view(View, Group, Fun, Db, QueryArgs, Keys) ->
         limit = Limit,
         skip = SkipCount
     } = QueryArgs,
-    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, Keys),
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, QueryArgs, Keys),
     {ok, RowCount} = couch_view:get_row_count(View),
     FoldAccInit = {Limit, SkipCount, undefined, []},
     {LastReduce, FoldResult} = lists:foldl(fun(Key, {_, FoldAcc}) ->
@@ -1209,7 +1209,7 @@ fold_reduce_view(View, Group, Fun, Db, QueryArgs, nil) ->
         skip = Skip,
         group_level = GroupLevel
     } = QueryArgs,
-    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View),
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, QueryArgs, nil),
     {ok, GroupRowsFun, RespFun} = couch_httpd_view:make_reduce_fold_funs(nil, GroupLevel,
                 QueryArgs, CurrentEtag, Group#group.current_seq,
                 #reduce_fold_helper_funs{
@@ -1227,7 +1227,7 @@ fold_reduce_view(View, Group, Fun, Db, QueryArgs, Keys) ->
         skip = Skip,
         group_level = GroupLevel
     } = QueryArgs,
-    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, Keys),
+    CurrentEtag = couch_httpd_view:view_etag(Db, Group, View, QueryArgs, Keys),
     {ok, GroupRowsFun, RespFun} = couch_httpd_view:make_reduce_fold_funs(nil, GroupLevel,
                 QueryArgs, CurrentEtag, Group#group.current_seq,
                 #reduce_fold_helper_funs{
